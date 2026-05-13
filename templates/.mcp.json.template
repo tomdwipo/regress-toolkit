@@ -1,0 +1,56 @@
+{
+  "mcpServers": {
+    "atlassian": {
+      "command": "npx",
+      "args": [
+        "mcp-remote@latest",
+        "https://mcp.atlassian.com/v1/mcp"
+      ]
+    },
+    "bitbucket": {
+      "command": "node",
+      "args": [
+        "{{MCP_DIR}}/bitbucket-mcp/dist/index.js"
+      ],
+      "env": {
+        "BITBUCKET_API_TOKEN": "{{BITBUCKET_API_TOKEN}}",
+        "BITBUCKET_EMAIL": "{{BITBUCKET_EMAIL}}"
+      }
+    },
+    "figma": {
+      "command": "node",
+      "args": [
+        "{{MCP_DIR}}/figma-mcp/dist/index.js"
+      ],
+      "env": {
+        "FIGMA_ACCESS_TOKEN": "{{FIGMA_ACCESS_TOKEN}}"
+      }
+    },
+    "jira-attachment": {
+      "command": "{{UV_BIN}}",
+      "args": [
+        "run",
+        "--directory",
+        "{{MCP_DIR}}/jira-attachment",
+        "python",
+        "mcp_server.py"
+      ],
+      "env": {
+        "JIRA_EMAIL": "{{JIRA_EMAIL}}",
+        "JIRA_API_TOKEN": "{{JIRA_API_TOKEN}}",
+        "JIRA_SITE": "{{JIRA_HOST}}",
+        "JIRA_CLOUD_ID": "{{JIRA_CLOUD_ID}}"
+      }
+    },
+    "video-to-image": {
+      "command": "{{UV_BIN}}",
+      "args": [
+        "run",
+        "--directory",
+        "{{MCP_DIR}}/video-to-image",
+        "python",
+        "mcp_server.py"
+      ]
+    }
+  }
+}

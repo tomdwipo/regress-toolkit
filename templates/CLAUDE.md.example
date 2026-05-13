@@ -1,0 +1,628 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+> **Maintenance:** Keep this file under **40,000 characters**. Before saving, run `wc -c CLAUDE.md`. If at/over the limit, compress § Recent Feature Updates first (one-line entries, drop paragraphs) and prune any quick-ref already externalised to `.docs/common-issues/`.
+
+## Project Overview
+
+{{PRODUCT_NAME}} Android is a banking application for Small and Medium Business (SMB) customers. The app supports two main business domains:
+- **Lending**: Loan applications, disbursement, repayment management
+- **Funding**: Account management, transfers, multi-account features
+
+Built with modern Android development practices using Jetpack Compose, Hilt, and Clean Architecture.
+
+## Quick Reference
+
+| Topic | Location |
+|-------|----------|
+| Architecture Diagrams | [.docs/c4/](.docs/c4/) |
+| Design System | [DESIGN_SYSTEM_RULES.md](DESIGN_SYSTEM_RULES.md) |
+| Deprecation Analysis | [DEPRECATION_ANALYSIS.md](DEPRECATION_ANALYSIS.md) |
+| Feature Examples | `feature-account-group`, `feature-beneficiary` |
+
+### Documentation Pipeline Commands
+
+Three-phase pipeline for feature documentation — from TRD to QA handoff:
+
+| Phase | Command | When to Use | Inputs |
+|-------|---------|-------------|--------|
+| Pre-impl | `/trd {feature or Confluence URL}` | Before coding | PRD (Confluence) + Figma + BE TRD + QA TRD + codebase |
+| Post-impl | `/feature-report {feature or Confluence URL}` | After coding | PRD (Confluence) + codebase (reads actual files) |
+| QA handoff | `/qa-align {feature or Jira ID}` | Before QA | QA TRD + Compliance Matrix + gap analysis |
+
+**Note:** PRD from Confluence is the primary input for `/trd` and `/feature-report`. Jira tickets are optional — used for ticketing/tracking only, not as requirement source.
+
+**Flags:** `--be-trd` (fetch BE TRD from Confluence), `--qa-trd` (fetch QA TRD from Confluence)
+
+**Output locations:**
+- `/trd` → `.docs/trd/TRD-{Name}.md`
+- `/feature-report` → `.docs/feature-report/{name}/` (README, COMPLIANCE_MATRIX, RESPONSIBILITY_SPLIT, QA_ALIGNMENT, TICKETS)
+- `/qa-align` → `.docs/feature-report/{name}/QA_ALIGNMENT.md` or `.docs/qa-alignment/QA-{Name}.md`
+
+## Build Commands
+
+### Setup
+
+**JDK 21+ is required** (Gradle 9.4.1 + AGP 9.2.1 floor):
+
+```bash
+bash scripts/setup-jdk.sh  # Auto-installs Temurin 21 + configures Gradle
+```
+
+Before building, you need credentials files. Generate them using:
+
+```bash
+bash generate_credentials.sh development  # For dev environment
+bash generate_credentials.sh staging      # For staging environment
+bash generate_credentials.sh production   # For production environment
+```
+
+This script fetches required credential files from CircleCI:
+- `credentials.properties` - API URLs and keys
+- `keystore.properties` - Signing configuration
+- `version.properties` - Version information
+- `google-services.json` - Firebase configuration
+
+### Build
+
+```bash
+# Build debug APK (development flavor)
+./gradlew assembleDevelopmentDebug
+
+# Build release APK (production flavor)
+./gradlew assembleProductionRelease
+
+# Build all variants
+./gradlew build
+
+# Install to connected device
+./gradlew installDevelopmentDebug
+```
+
+**Product Flavors**:
+- `development` - Development environment
+- `staging` - Staging environment
+- `production` - Production environment
+
+### Running Tests
+
+```bash
+# Run unit tests for a specific module (recommended)
+./gradlew {module}:testDebugUnitTest
+
+# Examples:
+./gradlew libs-permission:testDebugUnitTest
+./gradlew feature-biller:testDebugUnitTest
+./gradlew core-ui:testDebugUnitTest
+./gradlew feature-modules:testDebugUnitTest
+
+# Run unit tests for all modules
+./gradlew testDebugUnitTest
+```
+
+### Code Quality
+
+```bash
+# Run SonarQube analysis
+./gradlew sonar
+
+# Clean build
+./gradlew clean
+```
+
+### Local Quality-Release-Flow
+
+One-command script runs the full CI quality pipeline locally (~19 min), generates JSON + markdown report.
+
+```bash
+# Full run (Gradle + parse + report)
+./scripts/quality-report.sh
+
+# Parse existing reports only (no Gradle rebuild)
+./scripts/quality-report.sh --skip-gradle
+
+# Skip individual phases
+./scripts/quality-report.sh --skip-static   # skip overdraw/memory/storage/battery
+./scripts/quality-report.sh --skip-policy   # skip play policy lint
+```
+
+**Output files:**
+- `build/reports/quality-summary.json` — structured data with week-over-week delta
+- `build/reports/quality-report.md` — markdown ready for Confluence publish
+
+**Weekly workflow:** Run script → review markdown → tell Claude Code to publish to Confluence.
+
+**Reports generated at:**
+- Coverage: `build/reports/jacoco/report.xml` + per-module `{module}/build/reports/jacoco/report.xml`
+- Lint: `app/build/reports/lint-results-developmentDebug.xml`
+- APK Size: `build/reports/app-size/index.html`
+- Static Scans: `build/reports/{ui-overdraw,memory-leak,storage-io,battery-drain}/index.html`
+- Play Policy: `{module}/build/reports/lint-results-debug.xml`
+
+**Coverage-gated modules (18):** Strict (12) — core-data, core-utils, feature-account-group, feature-beneficiary, feature-biller, feature-lending, feature-mobile-token, feature-modules, feature-pending-task, feature-pin, feature-transaction-history, input-password. Baseline-floored (6) — core-analytics, core-messaging, core-testing, feature-liveness, lib-sign, libs-permission. Floors are pinned at-or-just-below today's measured coverage; treat as regression guards, not coverage targets.
+
+### CI/CD (CircleCI)
+
+Tiered quality gates with two-tier executors. Task branches have **zero auto-CI** — trigger manually when needed.
+
+📖 See [.docs/circleci-tiered-gates.md](.docs/circleci-tiered-gates.md) for full guide.
+
+**Manual triggers** (CircleCI UI → Trigger Pipeline):
+- `manual_quality_task=true` — sonarcloud only (~2,600 credits)
+- `manual_full_quality=true` — all 8 quality jobs (~5,000 credits)
+- `manual_build_apk=true` + `which_context=SmbDevSecrets` — dev APK build
+
+**Auto-trigger branches:** `epic/*` (dev build only), `hotfix/*`, `regress`, `releases/*`, `master`
+
+## Architecture
+
+### Multi-Module Structure
+
+- **app**: Activities, Application, navigation graph.
+- **core-\***: shared infrastructure — `core-ui`, `core-data`, `core-database`, `core-utils`, `core-analytics`, `core-messaging`, `core-testing`, **`core-observability`** (Apr 2026 — telemetry to Firebase Analytics, see `core-observability/README.md`).
+- **feature-\***: vertical slices — `feature-lending`, `feature-modules` (legacy aggregator), `feature-login-qr`, `feature-pending-task`, `feature-mobile-token` (standalone since {{JIRA_KEY}} / Mar 2026), `feature-biller`, `feature-transaction-history`, `feature-pin`, `feature-account-group`, `feature-beneficiary`, `feature-liveness`.
+- **libs-\***: `libs-permission`, `input-password`, `lib-sign`.
+
+Each module has its own `README.md` — that is the authoritative documentation.
+
+### Key Patterns
+
+**Architecture**: MVVM + Repository Pattern, Hilt DI, Jetpack Compose, Compose Navigation, Facade Pattern for complex ViewModels (`feature-modules/README.md`). Reference clean implementations: `feature-account-group`, `feature-beneficiary` ({{JIRA_KEY}} selection / {{JIRA_KEY}} delete with password+approval), `feature-liveness` (3 ViewModels: Auth/ForgotPwd/KYC, IDfy via Amar Liveness wrapper, flows: Forgot Password / KYC / Forgot PIN / Change Device).
+
+### Testing Strategy
+
+- **UI Tests**: Comprehensive UI tests using ComposeTestRule with robots and page objects
+- **Unit Tests**: Business logic testing with JUnit and MockK
+- **Screenshot Tests**: Visual regression testing with Roborazzi
+- **Test Runners**: HiltTestRunner for dependency injection in tests
+- **Module Testing**: Use `./gradlew {module}:testDebugUnitTest` for running unit tests per module
+
+## Module Documentation Quick Reference
+
+| Module | Key Documentation |
+|--------|-------------------|
+| 📱 **app** | Navigation patterns, conditional navigation, transfer flow integration, CrashlyticsLogTree + LogPatternDetector |
+| 🏗️ **feature-modules** | Clean architecture, Facade Pattern, OTP flows, KYC optimization, User Management |
+| 🎨 **core-ui** | Design tokens, component library, Generic Selector Interface |
+| 💰 **feature-biller** | Biller payments, validation rules, status handling |
+| 🔐 **feature-pin** | PIN management, security patterns |
+| 📋 **feature-pending-task** | Task workflows, PIN integration patterns, Pagination fix, Add User endpoint migration |
+| 🔍 **feature-login-qr** | QR code authentication |
+| 🪙 **feature-mobile-token** | Mobile token authentication, 21+ session types |
+| 🔑 **libs-permission** | Runtime permissions, device change workflows |
+| 📊 **feature-transaction-history** | Transaction history, detail, status badges |
+| 🗂️ **feature-account-group** | Account group management, widget visibility logic |
+
+## Recent Feature Updates
+
+**Single source of truth: module READMEs.** Chronological pointer index — full detail lives in the linked README/doc.
+
+### Apr 2026
+- **{{JIRA_KEY}}** — Browser icon mapping (CMS QR-Login); `BrowserType` + `BrowserIcon`. → `core-ui/`, `feature-login-qr/`, `.docs/common-issues/two-active-session-domains.md`
+- **{{JIRA_KEY}}** — Mobile Token `task_type` mapping (beneficiary-matrix add/delete). → `feature-mobile-token/`, `.docs/common-issues/mobile-token-pending-task-wrapper.md`
+- **{{JIRA_KEY}}** — Change Device 3rd entry point (`OtpChangeDeviceViewModel`). → `feature-modules/`, `.docs/common-issues/change-device-two-vms.md`
+- **{{JIRA_KEY}} / 9282** — Compose null guards + `NativeDetection` 16 KB static-init crash fix. → `feature-modules/`
+- **{{JIRA_KEY}} / 9260 / 9259** — Datadog `productionRelease`-only; A16 checkbox opaque; Play Integrity 4-retry.
+- **{{JIRA_KEY}} / 9217 / 9180 / 9181** — Crashlytics noise reduction (filters + log-level downgrades).
+- **{{JIRA_KEY}} / 9128** — Firebase Performance R8 keepnames + Play Vitals endpoint URL fix. → `app/`
+- **{{JIRA_KEY}}–14445 / 14577–14579 / {{JIRA_KEY}}** — Device-hash session endpoint. → `feature-pin/`, `feature-mobile-token/`
+- **{{JIRA_KEY}}** — Transfer service methods consolidated to `transfer_service_methods` RC.
+- **{{JIRA_KEY}}** — Gradle wrapper 9.4.1 + Crashlytics 3.0.6 (G9 prep).
+- **{{JIRA_KEY}} / 9046 / 9047** — `feature-modules` Material 2 → Material 3. → `feature-modules/`
+- **{{JIRA_KEY}} / 9107 / 9108** — `:core-observability` module (telemetry → Firebase Analytics). → `core-observability/`
+- **{{JIRA_KEY}} / 9064 / 9126** — KYC funnel (-41%), Play Integrity block, OTP recompose-loop. → `feature-modules/`
+- **TokenCacheManager populated in `saveUserSession`** — post-login 401 fix. → `.docs/2026/04/16/02-token-cache-fix/`
+- **{{JIRA_KEY}} / 9010-9013 / 9042 / 9043 / 8979** — AnrDetector log-level + battery drain + play-policy lint
+- **{{JIRA_KEY}}–8987** — Quality campaign 13+ modules (overdraw 122→~5, x86 dropped, JDK 21+). → READMEs
+- **{{JIRA_KEY}}** — Lending withdraw → transfer success routing. → `feature-lending/`, `feature-modules/`
+- **{{JIRA_KEY}} / 8891 / 8895** — Loan Resume KYC "Giro First" combine-journey fix. → `feature-lending/`, `feature-modules/`
+
+### Mar 2026
+- **{{JIRA_KEY}}** — `feature-mobile-token` extracted to standalone module; `{{APP_CODE}}TrxRepository` retired. → `feature-mobile-token/`
+- **{{JIRA_KEY}}–13827** — Operational hour checks (`GetOperationalHourUseCase`, `OperationalHourDialog`). → `feature-modules/`, `core-ui/`
+- **{{JIRA_KEY}} / 8679 / 8677** — NotificationScreen split (DEX-verify ANR), all 41 `runBlocking` removed, Dashboard DataStore ANR. → `feature-modules/`
+- **{{JIRA_KEY}}/8692/8696/8649/8648/8650/8655/8661** — OTP fixes (field-disable, blocked-state, countdown race, resend error). → `feature-modules/`, `feature-pin/`
+- **{{JIRA_KEY}}–13856** — Test coverage campaign across 8 modules + JaCoCo gate
+- **Timber migration** — all `android.util.Log` → Timber across all modules
+- **{{JIRA_KEY}} / 8799-8807 / 8741 / 8768 / 8800 / 8787 / 8633** — KYC perf/nav, Dashboard stability, PIN/Brankas. → `feature-modules/`
+- **{{JIRA_KEY}} / {{JIRA_KEY}}** — Unified OTP module (`core-data/otp/`, 5 types) + Play Integrity 1h TTL. → `core-data/`, `feature-modules/`
+- **{{JIRA_KEY}}** — Lending `getTrackerData()` coroutine race fix
+
+### Feb 2026
+- **{{JIRA_KEY}} / {{JIRA_KEY}} / {{JIRA_KEY}}** — Dashboard flicker, `SHOW_LOAN_FEATURE`, SmartLook removal. → `feature-modules/`
+- **{{JIRA_KEY}} / {{JIRA_KEY}}** — Pending-task pagination, Add User endpoint migration. → `feature-pending-task/`
+- **{{JIRA_KEY}}** — Profile tag legality position fix. → `feature-modules/`
+- **{{JIRA_KEY}}** — AccountGroup widget visibility. → `feature-account-group/`
+
+### Jan 2026 ← Dec 2025
+- AccountGroup widget visibility, CMS QR Remote Config, KYC Profile API opt, image compression, Token Listrik, transaction status badges → respective module READMEs.
+
+### C4 Architecture Diagrams
+
+Visual architecture diagrams are available in [.docs/c4/](.docs/c4/):
+
+| Document | Description |
+|----------|-------------|
+| [01-system-context.md](.docs/c4/01-system-context.md) | System view with external systems (Firebase, Keycloak, APIs) |
+| [02-container-overview.md](.docs/c4/02-container-overview.md) | All modules and dependencies |
+| [03-core-infrastructure.md](.docs/c4/03-core-infrastructure.md) | Core modules breakdown (core-data, core-ui, etc.) |
+| [04-feature-modules.md](.docs/c4/04-feature-modules.md) | Feature modules details |
+| [05-component-architecture.md](.docs/c4/05-component-architecture.md) | Clean Architecture layers (Domain/Data/Presentation) |
+| [06-feature-example.md](.docs/c4/06-feature-example.md) | feature-lending deep dive (reference) |
+| [07-flow-lending.md](.docs/c4/07-flow-lending.md) | Complete loan application flow |
+| [08-flow-funding.md](.docs/c4/08-flow-funding.md) | Account/transfer flow |
+
+Each document includes **Mermaid diagrams** (GitHub rendering) and **ASCII diagrams** (terminal viewing).
+
+### Clean Architecture Layers
+
+Each feature typically follows this structure:
+
+```
+feature-xxx/
+├── domain/                    # Business logic (pure Kotlin)
+│   ├── model/                 # Domain models
+│   ├── repository/            # Repository interfaces
+│   ├── usecase/               # Use cases
+│   └── strategy/              # Business rule strategies
+├── data/                      # Data access
+│   ├── repository/            # Repository implementations
+│   ├── remote/
+│   │   ├── api/               # Retrofit API interfaces
+│   │   └── dto/               # Network DTOs
+│   └── mapper/                # DTO ↔ Domain mappers
+└── presentation/              # UI layer
+    ├── view_models/           # Hilt ViewModels
+    ├── screens/               # Composable screens
+    ├── components/            # Reusable components
+    └── states/                # UI state models
+```
+
+### State Management
+
+Uses **StateFlow + Unidirectional Data Flow**:
+
+```kotlin
+// Define immutable state
+data class MyUiState(
+    val isLoading: Boolean = false,
+    val data: List<Item> = emptyList(),
+    val errorMessage: String? = null
+)
+
+// In ViewModel - Use update for thread-safe state modifications
+private val _uiState = MutableStateFlow(MyUiState())
+val uiState: StateFlow<MyUiState> = _uiState.asStateFlow()
+
+// ✅ Correct: Modern StateFlow pattern
+_uiState.update { it.copy(isLoading = true) }
+
+// ❌ Incorrect: Legacy pattern - Thread unsafe
+_uiState.value = _uiState.value.copy(isLoading = true)
+```
+
+### Navigation
+
+Jetpack Compose Navigation, defined in `app/src/main/java/id/co/{{org_slug}}/smb/ui/Navigation.kt`:
+- **Modular composable extensions**: each feature contributes a `loginComposable / dashboardComposable / beneficiaryComposable / …` to `NavGraphBuilder`. `loginComposable` includes `livenessComposable()` (type-safe routes in `core-ui/navigation/LivenessNavigationRoute.kt`); launch via `navController.startLivenessFlow(LivenessType.FORGOT_PASSWORD, userId)`.
+- **Type-safe routes** via Kotlin Serialization (`composable<MyRoute> { it.toRoute() }`).
+- **Deep links** registered with `navDeepLink { uriPattern = … }`.
+- **Deeplink lifecycle rules**: `onCreate()` cold-start, `onNewIntent()` running/background, `onResume()` does NOT re-process ({{JIRA_KEY}}) — see `.docs/2026/01/31/01-deeplink-resume-fix/`.
+
+## Common Development Patterns
+
+### Creating a New Feature
+
+1. **Create module** in `settings.gradle.kts`:
+```kotlin
+include(":feature-my-feature")
+```
+
+2. **Follow Clean Architecture structure**:
+   - Start with **domain layer**: models, repository interface, use cases
+   - Implement **data layer**: repository impl, API, DTOs, mappers
+   - Build **presentation layer**: ViewModel, screens, components
+
+3. **Set up DI module** in `di/` package:
+```kotlin
+@Module
+@InstallIn(SingletonComponent::class)
+object MyFeatureDataModule { /* ... */ }
+```
+
+4. **Add navigation** in main `Navigation.kt`:
+```kotlin
+fun NavGraphBuilder.myFeatureComposable(navController: NavHostController) {
+    composable(route = Pages.MyFeature.route) {
+        MyFeatureScreen(/* ... */)
+    }
+}
+```
+
+### Mapper / Use Case / Strategy Patterns
+
+- **Mapper**: `object MyEntityMapper` with `toDomain(dto): Entity?` (null-safe) and `toDomainList(dtoList): List<Entity>` (uses `mapNotNull`).
+- **UseCase**: `@Singleton class GetDataUseCase @Inject` with `suspend operator fun invoke(id): Resource<Data>` — call sites read like `useCase(id)`.
+- **Strategy**: extract business rules into `@Singleton class MyFormattingStrategy` and inject into use cases for testability.
+
+### Testing
+
+- Unit tests in `src/test/` with JUnit + MockK; arrange/act/assert.
+- Hilt integration tests use `HiltAndroidTest` + `HiltAndroidRule(this).inject()` in `@Before`.
+
+### Preview Composables
+
+Always add `@Preview(showBackground = true)` previews for Composable components.
+
+## Key File Locations
+
+- **Main Navigation**: `app/src/main/java/id/co/{{org_slug}}/smb/ui/Navigation.kt`
+- **Main Activity**: `app/src/main/java/id/co/{{org_slug}}/smb/ui/MainActivity.kt`
+- **Core Repositories**: `core-data/src/main/java/id/co/{{org_slug}}/smb/core/data/`
+- **Networking Setup**: `core-data/src/main/java/id/co/{{org_slug}}/smb/core/data/network/`
+- **DI Modules**: Each module has `di/` package
+- **Design System**: `core-ui/src/main/java/id/co/{{org_slug}}/smb/core/ui/`
+
+## Important Conventions
+
+### Naming
+
+- **ViewModels**: `{Feature}ViewModel`
+- **Use Cases**: `{Action}{Entity}UseCase` (e.g., `GetAccountGroupListUseCase`)
+- **Repositories**: `{Entity}Repository` (interface), `{Entity}RepositoryImpl` (impl)
+- **Screens**: `{Feature}Screen`
+- **State classes**: `{Feature}UiState`
+- **Mappers**: `{Entity}Mapper` (object)
+
+### Code Style
+
+- Follow Kotlin coding conventions
+- Use Compose for all new UI
+- Implement proper error handling with Result types
+- Use coroutines for async operations
+- Add proper test tags to UI components for testing
+
+### Localization Standards
+
+Follow guidelines in `.docs/guidelines/LOCALIZATION_GUIDELINES.md`:
+- Use professional Indonesian terminology
+- Preserve technical terms ("User ID", "Email", "Password")
+- Follow capitalization rules
+
+### Design System
+
+Follow guidelines in `DESIGN_SYSTEM_RULES.md`: color tokens from `core-ui/Color.kt`, text styles from `core-ui/TextStyles.kt`, atomic components from `core-ui/`, minimum touch targets 48 dp + contentDescription.
+
+## Security & Performance
+
+- **SSL Pinning**: Certificate pinning configured in `OkHttpClientFactory`
+- **ProGuard/R8**: Obfuscation rules in `proguard-rules.pro`
+- ~~**AndResGuard**: Resource obfuscation enabled in release builds~~ — removed permanently in {{JIRA_KEY}} (AGP-9 incompatible, fork archived). APK resources +10-20% accepted as the new normal.
+- **Play Integrity**: Device attestation via FraudDataCollector SDK ({{JIRA_KEY}}, Mar 2026)
+- **Firebase Crashlytics**: Crash reporting and analytics
+- **Biometric Auth**: Fingerprint/Face ID via `BiometricPromptManager`
+
+## Common Issues
+
+📖 **Full catalog:** [`.docs/common-issues/README.md`](.docs/common-issues/README.md) — subject-grouped index + Unified Save Protocol for adding new issues or memory entries.
+
+> **Rule — session learnings ALWAYS go to the catalog.**
+> When the user says "take lesson", "save this learning", "document this for the team", or any equivalent phrasing, the default destination is `.docs/common-issues/` (git-shared). Memory is personal scope and only teaches *future-me*; the catalog teaches the whole team. Only skip the catalog if the learning is strictly a personal preference (user profile, workflow quirks) — those live in memory only. Follow the Unified Save Protocol in the catalog README: scan for a related chapter first, then either append a dated sub-note or create a new chapter + add a row to the catalog index + drop a 1-line pointer in this §Common Issues.
+
+### When to scan the catalog (2 gates, not 1)
+
+1. **Lookup gate — every first user message (no "substantive" filter).** Scan catalog index + `MEMORY.md`; if any keyword overlap with the 7 subjects (`build-gradle` · `ci` · `firebase` · `kmp-ios` · `networking-auth` · `release` · `testing`), **open the matching detail file before answering** — even on meta/greeting messages. **Why:** "substantive" judgments misfire; the read is cheap and prevents re-discovery.
+2. **Save gate — before writing any new learning.** Scan catalog + `MEMORY.md`; if a related subject exists, append a dated sub-note instead of creating a sibling.
+
+### Inline quick-refs (short tips without a dedicated chapter)
+
+#### KSP Version Warning
+If you see "ksp-2.0.20-1.0.24 is too old for kotlin-2.0.21":
+- Known warning, ignore; build succeeds.
+
+#### Missing Credentials
+If build fails with missing properties:
+- Run `bash generate_credentials.sh development`
+- Requires CircleCI access + valid API token.
+
+#### Hilt Build Errors
+If Hilt annotation processing fails:
+- `./gradlew clean`, invalidate Android Studio caches, ensure `@HiltAndroidApp` on Application.
+- Check module has `ksp(libs.hilt.android.compiler)` dependency.
+
+#### Kotlin 2.x: drop `kotlin.incremental.useClasspathSnapshot` from your global gradle.properties
+Sync emits `Deprecated Gradle Property 'kotlin.incremental.useClasspathSnapshot' Used`. The flag was a Kotlin 1.7 opt-in (default in 1.8.20+) and is **unsupported in Kotlin 2.x** — KGP always uses the ABI-snapshot path now. Repo's `gradle.properties` is clean; the line lives in your **user-global** `~/.gradle/gradle.properties`. Remove it (or replace with a dated tombstone comment). `kotlin.incremental=true` is a different flag and stays. {{JIRA_KEY}}.
+
+#### `amar-liveness` version is owned by the Confluence skill page, not by either branch
+When merging `epic/DS-*-poc-advanceai` ↔ `regress` and the `amar-liveness` line in `gradle/libs.versions.toml` conflicts (e.g. `1.2.0` vs `1.2.0-beta006`), neither side is automatically right. The canonical pinned version lives in [Agent Integration Skill: centralized-liveness-implementation](https://{{JIRA_HOST}}/wiki/spaces/SMB/pages/{{CONFLUENCE_PAGE_ID}}) (current production: `1.3.1`, AGP 9 baseline; skip `1.3.0` — Artifact Registry slot is permanently dead). Both branches drift; resolve by reading the skill page, not by picking the "newer-looking" version. Same rule applies to the iOS pin (`from: "1.2.0"` resolves to `ios-1.2.1`).
+
+#### Render typed/enum-like API strings via a canonical helper, never the raw payload
+A field that arrives from a typed FE/BE contract (`platform: "chrome"`, status enum keys, etc.) is *case-sensitive in code* but the UI must not reveal that. Render via a `displayName(value)` helper on the same enum that owns the icon/colour mapping — it title-cases known values, falls back gracefully on unknown — so a future BE casing drift (`"Chrome"` instead of `"chrome"`) never reaches the user as `"chrome"` text plus a globe icon. {{JIRA_KEY}} / `BrowserType.displayName()` for the reference shape.
+
+#### `git pull` fails with `cannot lock ref 'refs/remotes/origin/Conflict/...'` — Bitbucket case-collision on macOS
+Bitbucket has both `Conflict/epic_{{JIRA_KEY}}_development` (PascalCase) and `conflict/epic_{{JIRA_KEY}}_development` (lowercase) as separate remote branches. macOS APFS is case-insensitive by default, so git can't store both refs side-by-side and the second fetch fails with `is at X but expected Y` on whichever case lost the race. Fix: `git remote prune origin && git pull` — prune drops the stale entry, then the next fetch recreates the winning case. Don't `git fetch --prune` blindly inside CI; this is a local-clone artifact only. Same pattern hits `Conflict/epic_{{JIRA_KEY}}-beneficiary` and friends.
+
+### Library Module Gradle Tasks (no flavor)
+Library modules (`feature-*`, `core-*`, `libs-*`) have **no product flavors** — only `:app` does.
+- ❌ `./gradlew :feature-modules:compileDevelopmentDebugKotlin` → `task not found`
+- ✅ `./gradlew :feature-modules:compileDebugKotlin` / `:feature-modules:testDebugUnitTest`
+- App module needs the flavor prefix: `./gradlew :app:assembleDevelopmentDebug`
+
+### Test-Compile Reflex After Type Removal or Hilt-VM Ctor Merge
+Two failure modes share one fix: `:module:testDebugUnitTest` won't run if a test file has a stale
+import to a deleted type ({{JIRA_KEY}} `AccountBody`) **or** instantiates a Hilt VM whose ctor merge
+added a new required param (`PreviewSelfieViewModel` + `saveDeviceInformationUseCase`). Main-source
+compile and conflict-marker grep miss both. Reflex: run `:module:compileDebugUnitTestKotlin` after
+any deletion/merge — the compile errors are the fix-up checklist.
+
+### Kotlin `internal` Constants Consumed Cross-Module Won't Compile
+Constants/objects declared `internal` in a `feature-*` module **cannot** be referenced from
+another Gradle module (e.g. `app/Navigation.kt`). Symptom: "Cannot access 'X': it is internal in …"
+at compile. Fix: drop the `internal` modifier (default = public). Hit during {{JIRA_KEY}} chat-widget
+TTL wire-up where `ChatWidgetSessionStore.DEFAULT_DURATION_MINUTES` was needed by `app`.
+
+### Adding a Timber Call to an Extracted Module May Break the Build
+Standalone modules carved out of `feature-modules` (e.g. `feature-mobile-token` extracted
+{{JIRA_KEY}}) do not always inherit Timber. Adding `Timber.w(...)` for the first time fails
+`compileDebugKotlin` with `Unresolved reference 'Timber'`. Fix: add `implementation(libs.timber)`
++ `lintChecks(libs.timber)` to the module's `build.gradle.kts` (same pattern as `feature-modules` /
+`feature-biller`). Always grep the module's `build.gradle.kts` for `libs.timber` before assuming
+the dep is present in implementation plans.
+
+### JaCoCo Per-Module Thresholds Live in `gradle.properties`, Not the Convention Plugin
+`build-logic/.../jacoco-android-convention.gradle.kts` reads `jacocoMinInstruction` / `jacocoMinBranch`
+via `project.findProperty()` (defaults `0.76 / 0.60`). Per-module overrides live in each module's
+`gradle.properties`. Don't edit the convention plugin to ratchet one module — bump that module's
+`gradle.properties`. A module that applies the plugin but ships **no** `gradle.properties` falls to the
+default and fails the gate (2026-05-04 CI #19179 hit `lib-sign`, `core-testing`, `core-analytics`,
+`core-messaging`, `feature-liveness`, `libs-permission`).
+
+Local gotchas: `./gradlew runCoverageGate` errors `Task not found` on Gradle 9 — task is registered in
+`gradle.projectsEvaluated{}`, configure-on-demand skips subproject eval. Use `:runCoverageGate
+--no-configuration-cache --no-configure-on-demand` (CI unaffected). After a threshold bump,
+`jacocoCoverageVerification` can show **UP-TO-DATE** (threshold isn't a task input); add `--rerun-tasks`
+to force re-exec and see the `[CoverageGate]` echo line.
+
+#### Unit Testing `UserDataStoreRepository` — DataStore singleton blocks direct tests
+`saveUserSession()` instantiates `DataStoreRepository(context.userDataStore)` — the `preferencesDataStore` delegate is a singleton needing real `filesDir`, so `mockk(relaxed = true)` + `TemporaryFolder` fails with `NullPointerException: parent.path is null`.
+- **Workaround:** test `TokenCacheManager` populate/invalidate contract directly; DataStore persistence is covered by existing tests.
+- `EncryptionHelper.encrypt()` throws `InvalidAlgorithmParameterException` in JVM tests — mock `encryptionHelperType` if you must call `saveUserSession()`.
+
+### `@OptIn(ExperimentalMaterial3Api)` Propagates to Every Caller of a Default-Param Sheet Composable
+A `core-ui` composable that exposes `sheetState: SheetState = rememberModalBottomSheetState(...)` as a **default parameter** evaluates that expression at the **call site** — so every caller still needs `@OptIn(ExperimentalMaterial3Api::class)` on the enclosing composable, even though the wrapper itself is opted-in. Symptom: `compileDebugKotlin` fails with `This material API is experimental and is likely to change…` on the line that simply invokes the wrapper. Hit during {{JIRA_KEY}} when adding `ChatUnavailableBottomSheet` to `OtherFragment`. Fix: add `@OptIn(ExperimentalMaterial3Api::class)` to the calling composable, or expose the param without a default (force callers to pass an explicit `SheetState`).
+
+Full list & details: [`.docs/common-issues/README.md`](.docs/common-issues/README.md). Quick links:
+
+- [CI OOM — Gradle daemon disappeared](.docs/common-issues/ci-oom-gradle-daemon.md)
+- [Google Play 16 KB page-size rejection](.docs/common-issues/google-play-16kb-pages.md)
+- [Firebase Remote Config — parameter groups](.docs/2026/04/14/firebase-remote-config-parameter-groups.md)
+- [Two networking patterns — `BaseRepository` vs `HeaderInterceptor`](.docs/2026/04/16/02-token-cache-fix/)
+- [Change Device — THREE parallel entry-point ViewModels ({{JIRA_KEY}})](.docs/common-issues/change-device-two-vms.md)
+- [MockK strict stub + `DeviceIdValidator.sanitize`](.docs/common-issues/mockk-strict-stub-deviceid-sanitize.md)
+- [AS Gradle Daemon journal cache lock](.docs/common-issues/as-gradle-daemon-journal-lock.md)
+- [KMP iOS — `IrLinkageError` via `NavBackStackEntry`](.docs/common-issues/kmp-ios-nav-ir-linkage.md)
+- [KMP iOS — physical-iPhone build/install/launch](.docs/common-issues/kmp-ios-build-runbook.md)
+- [KMP `:shared` — Android consumption reality check](.docs/common-issues/kmp-shared-android-consumption.md)
+- [User-Management Access — 4-place DTO fan-out](.docs/common-issues/user-management-access-dto-fanout.md)
+- [Compose Material3 Checkbox — invisible box on Android 16](.docs/common-issues/compose-checkbox-android16-invisible-box.md)
+- [CXX5304 — SDK XML version warning](.docs/common-issues/cxx5304-sdk-xml-version-warning.md)
+- [JaCoCo `Task.project` breaks Gradle 9 config cache](.docs/common-issues/jacoco-task-project-config-cache.md)
+- [SonarQube 5.x — Gradle 9 strict resolution lock failure](.docs/common-issues/sonarqube-5x-gradle9-strict-resolution.md)
+- [Two "active-session" / device-info domains — route by DTO](.docs/common-issues/two-active-session-domains.md)
+- [Mobile Token — `PENDING_TASK` wrapper drops `context.task_type`](.docs/common-issues/mobile-token-pending-task-wrapper.md)
+- [Crashlytics Gradle plugin 3.x — Gradle 9 classloader fix](.docs/common-issues/crashlytics-gradle-3x-gradle9-classloader.md)
+- [WebView Hybrid Widget Patterns (Yellow.ai)](.docs/common-issues/webview-hybrid-widget-patterns.md)
+- [Roborazzi — silent-pass, modal-popup, `.figma.png` RE-RECORD sibling](.docs/common-issues/roborazzi-screenshot-testing-gotchas.md)
+- [`LogNotTimber` migration — phantom baseline warnings + Crashlytics non-fatal traffic](.docs/common-issues/lognottimber-migration-followups.md)
+- [Unit-testing `feature_stopper` detection helpers — `CD.TP` Firebase clinit + `IS_STOP_DEBUG_AC` short-circuit](.docs/common-issues/feature-stopper-detection-tests.md)
+- [Robolectric tests don't feed JaCoCo coverage in this repo (sandbox classloader)](.docs/common-issues/robolectric-jacoco-sandbox-classloader.md)
+- [SAST silencing for debug-only WebView tweaks — `src/release/` + `src/debug/` source-set pair](.docs/common-issues/webview-debug-source-set-pair.md)
+- [Global vs project `gradle.properties` — which keys to keep where ({{JIRA_KEY}})](.docs/common-issues/global-vs-project-gradle-properties.md)
+- [ViewModel cache hydration race — read fresh from DataStore at the network boundary ({{JIRA_KEY}})](.docs/common-issues/viewmodel-datastore-hydration-race.md)
+- [GWP-ASan `android:gwpAsanMode="always"` — safe app-wide; recoverable on API 34+, sampled-fatal on 30-33, no-op on <30 ({{JIRA_KEY}})](.docs/common-issues/gwp-asan-always-on.md)
+- [Datadog RUM — `core-apm` wrapper hides `setSessionSampleRate`; SDK default 100% applies ({{JIRA_KEY}})](.docs/common-issues/datadog-rum-wrapper-no-sample-rate.md)
+- [Datadog R8 mapping upload — `DD_API_KEY` in CircleCI context; needs two gradle invocations ({{JIRA_KEY}})](.docs/common-issues/datadog-mapping-upload-gotchas.md)
+- [`popBackStack(target)` silently no-ops when target not on stack — multi-entry flows must `navigate+popUpTo(current,inclusive=true)` ({{JIRA_KEY}} sub-note)](.docs/common-issues/liveness-cancel-popbackstack-target.md)
+- [Gitleaks `.docs/**/*.md` false-positive class — DO NOT propose work on {{JIRA_KEY}}/9624/9625/9626 or future siblings (allowlist + redact placeholders applied)](.docs/common-issues/gitleaks-docs-illustrative-literals.md)
+- [Hilt 2.59.x has AGP 9.0+ floor ({{JIRA_KEY}})](.docs/common-issues/hilt-2-59-agp-9-floor.md)
+- [AGP 9 lift is a 7-fold dependency cascade — plan as 6 PRs not 1 ({{JIRA_KEY}})](.docs/common-issues/agp-9-lift-cascade.md)
+
+## Module Documentation (Epic-specific)
+
+- **feature-liveness**: [feature-liveness/README.md](feature-liveness/README.md) — IDfy face-verification (Amar Liveness wrapper). Flows: Forgot Password / KYC / Forgot PIN / Change Device. Three split VMs (`AuthenticatedLivenessViewModel` / `ForgotPasswordLivenessViewModel` / `KycLivenessViewModel`); `LivenessSessionTracker` singleton persists state across VM recreation. API contract: [TRD BE 2026-01-15](https://{{JIRA_HOST}}/wiki/spaces/SMB/pages/{{CONFLUENCE_PAGE_ID}}).
+
+## Android Platform Standards
+
+Condensed rules from [android/skills](https://github.com/android/skills). Full workflows available via `/agp-9-upgrade`, `/r8-analyzer`, `/edge-to-edge` skills.
+
+### Edge-to-Edge (targetSdk 35)
+- Every Activity must call `enableEdgeToEdge()` before `setContent`
+- Use `Scaffold` + `innerPadding` + `consumeWindowInsets(innerPadding)` (preferred)
+- IME: prefer `fitInside(WindowInsetsRulers.Ime.current)` or `imePadding()` — must be BEFORE `verticalScroll()`
+- NEVER combine `contentWindowInsets = WindowInsets.safeDrawing` with `imePadding()` (double padding)
+- Lists: pass insets to `contentPadding`, NOT `Modifier.padding()` on parent (clips scrolling)
+- FABs: must be inside Scaffold or use `safeDrawingPadding()` to clear nav bar
+- Full-screen dialogs (`usePlatformDefaultWidth = false` + `fillMaxSize`): add `decorFitsSystemWindows = false`
+
+### ProGuard/R8 Rules
+- Do NOT add keep rules for AndroidX, Kotlin, Room, Gson, Retrofit — they ship their own consumer rules
+- Prefer narrow, specific keep rules over broad package-wide rules (`-keep class com.pkg.**`)
+- After adding keep rules, check for subsumption (a broader rule making a specific one redundant)
+- Our DEX verification crash fix added broad keep rules (+10-15% APK) — audit periodically
+- Run `/r8-analyzer` for full 9-step audit with impact hierarchy analysis
+
+### Build Upgrade Readiness (AGP 9)
+- Current: AGP 8.13.2, Gradle 8.14.4, Hilt 2.58, compileSdk 36, targetSdk 35
+- AGP 9 requires: Gradle 9.1.0+, Hilt 2.59.2+, KSP 2.3.6+, JDK 17+
+- AGP 9 removes `kotlinOptions{}` — migrate to `kotlin { compilerOptions {} }`
+- AGP 9 removes `applicationVariants` — use `androidComponents.onVariants` API
+- AGP 9 built-in Kotlin removes need for `kotlin-android` plugin
+- Run `/agp-9-upgrade` for full 6-step migration workflow with references
+
+## Additional Documentation
+
+- **Feature Reports**: [.docs/feature-report/README.md](.docs/feature-report/README.md)
+  - PRD compliance reports for implemented features
+  - Requirement-by-requirement mapping with code references
+  - Mobile vs Backend responsibility split
+  - **Available Reports**:
+    - `liveness-forgot-password` - PRD: Active Liveness - Forgot Password (Status: Compliant)
+    - `liveness-account-opening` - PRD: Active Liveness - Account Opening (Status: ✅ GAP-001 Fixed 2026-02-02)
+    - `liveness-forgot-pin` - PRD: Active Liveness - Forgot PIN (Status: ✅ Implemented {{JIRA_KEY}})
+      - **Flow**: Password → OTP → Liveness → New PIN → Success
+      - **Navigation**: `ForgotPinComposable.kt` with `Pages.ForgotPinOtp`, `Pages.ForgotPinLiveness`, `Pages.ForgotPinNewPin`, `Pages.ForgotPinSuccess`
+      - **📖 Full details**: `.docs/feature-report/liveness-forgot-pin/`
+    - `liveness-change-device` - PRD: Active Liveness - Change Device (Status: 🔄 In Progress - OTP→Liveness integrated, 2 gaps remaining)
+
+- **Design System Rules**: [DESIGN_SYSTEM_RULES.md](DESIGN_SYSTEM_RULES.md)
+- **Deprecation Analysis**: [DEPRECATION_ANALYSIS.md](DEPRECATION_ANALYSIS.md)
+- **Feature Modules Guide**: [feature-modules/README.md](feature-modules/README.md)
+- **Biller Module Guide**: [feature-biller/README.md](feature-biller/README.md)
+
+## Commit Message Convention
+
+Follow conventional commits:
+```
+feat: Add beneficiary selection screen
+fix: Resolve crash on loan disbursement
+refactor: Extract common UI components
+docs: Update architecture documentation
+test: Add tests for transfer validation
+```
+
+**Important:** Do not add "Generated with Claude Code" to commit messages. Use "Generated with LAYER" if automated attribution is needed.
+
+### Pre-commit learning-capture (mandatory)
+
+> **Before `git add` / `git commit` / `git push`, always harvest the session's non-obvious learnings into `.docs/common-issues/` first.**
+>
+> When the user says "commit all push" (or equivalent one-shot ship), the correct order is:
+> 1. Scan the session for non-obvious gotchas, surprising facts, validated judgment calls.
+> 2. For each: follow the Unified Save Protocol in [`.docs/common-issues/README.md`](.docs/common-issues/README.md) — scan for a related chapter first; append a dated sub-note or create a new chapter + catalog row + 1-line pointer in §Common Issues.
+> 3. *Then* stage, commit, push, open PR — and include the catalog changes in the same commit.
+>
+> **Do not ask permission** — this is a standing rule; asking "want me to capture first?" wastes a turn. If there are genuinely no new learnings, say so explicitly in the summary ("no new catalog entries this session"). Memory entries are fine as a mirror but must not be the *only* destination — teammates can't see personal memory.
+
+## PR Target Convention
+
+Default PR target is **`regress`** (the integration/staging branch), not `master`. `master` receives code only via merges from `releases/*`.
+
+Routing rules:
+
+| Source branch | PR target |
+|---|---|
+| `task/DS-####` with a source epic comment | the epic branch (e.g. `epic/{{JIRA_KEY}}-fraud`) |
+| `task/*` / `docs/*` / standalone work with no epic | **`regress`** |
+| `hotfix/*` | the active `releases/*` branch |
+| `releases/*` | `master` |
+
+If the target is not otherwise classified, default to `regress` — never silently pick `master`.
+
+## Resources
+
+- **Jira**: Project tickets at `https://{{JIRA_HOST}}`
+- **Confluence**: Documentation at `https://{{JIRA_HOST}}/wiki/spaces/SMB/`
+- **Bitbucket**: Repo at `https://bitbucket.org/{{BITBUCKET_WORKSPACE}}/{{ANDROID_REPO}}` — workspace slug is **`{{LEGACY_PRODUCT}}`** (not `amar-smb`). Required for `mcp__bitbucket__*` tool calls: `workspace="{{BITBUCKET_WORKSPACE}}"`, `repoSlug="{{ANDROID_REPO}}"`. Using the wrong slug returns an ambiguous 404 ("make sure you are authenticated") that looks like an auth failure but is actually a bad path.
+- **Design System**: Material3 components in `core-ui`
+- **Architecture Reference**: See `feature-account-group` and `feature-beneficiary` for clean implementation examples

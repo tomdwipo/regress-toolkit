@@ -1,0 +1,43 @@
+# Never commit real MCP config — only the template
+.mcp.json
+**/.mcp.json
+.mcp.json.bak.*
+
+# Local Claude settings — only the template ships
+.claude/settings.local.json
+**/settings.local.json
+!templates/settings.local.json.template
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Test artefacts
+tests/.bats-tmp/
+tests/.tmp/
+
+# Token files (defence in depth)
+*.token
+*token.txt
+.env
+.env.local
+secrets/
+
+# Local-only leak/sanitiser config — keeps company-specific patterns out of
+# the public repo. Maintainers copy *.example to the real name and fill in.
+.leak-patterns.local
+.sanitize.sed.local
+
+# Presentation binaries — exports contain unsanitisable embedded text/images.
+# Only the sanitised HTML + speaker notes ship.
+presentation/exports/
+presentation/assets/
+presentation/**/*.pdf
+presentation/**/*.pptx
+presentation/**/*.png
+presentation/**/*.jpg
+presentation/**/*.jpeg

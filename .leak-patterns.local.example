@@ -1,0 +1,37 @@
+# .leak-patterns.local.example — TEMPLATE for the local pre-push leak scanner.
+#
+# Copy this file to `.leak-patterns.local` (gitignored) and fill in patterns
+# that must NEVER appear in a public commit:
+#
+#   cp .leak-patterns.local.example .leak-patterns.local
+#   $EDITOR .leak-patterns.local
+#
+# Format: one extended-regex pattern per line. Lines starting with # are
+# comments. scripts/check-leaks.sh greps the repo tree with `grep -Eifn`
+# against this file.
+#
+# Suggested categories:
+
+# --- Org / product / internal codenames ----------------------------------
+# YourOrgName
+# YourProductName
+# YourInternalCodename
+
+# --- Hosts ---------------------------------------------------------------
+# your-org\.atlassian\.net
+# api\.your-product\.com
+
+# --- VPS / infra IPs -----------------------------------------------------
+# 10\.0\.0\.1
+# /home/your-vps-user/
+
+# --- User-specific paths ------------------------------------------------
+# /Users/your-mac-user/
+
+# --- Token formats (these are universal — already covered by sanitize.sed,
+#     listed here for the pre-push double-check) -----------------------------
+ATATT3xFfGF0[A-Za-z0-9_=-]{8,}
+figd_[A-Za-z0-9_-]{8,}
+gho_[A-Za-z0-9]{8,}
+sk-[A-Za-z0-9]{20,}
+AKIA[A-Z0-9]{16}

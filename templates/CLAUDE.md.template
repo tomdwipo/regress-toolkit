@@ -1,0 +1,161 @@
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working in this repository.
+
+> **Maintenance:** Keep this file under **40,000 characters**. After every edit run `wc -c CLAUDE.md`. If at/over the limit, compress §Recent Updates first (one-line entries, drop paragraphs) and prune any quick-ref already externalised to `.docs/common-issues/`.
+
+## Project Overview
+
+{{PRODUCT_NAME}} is a {{PRODUCT_DESCRIPTION}}. Replace this paragraph with a 2–3 line description of:
+- What domain the app serves
+- The main business capabilities (e.g. lending, funding, payments)
+- The architecture stance (e.g. Jetpack Compose, Hilt, Clean Architecture)
+
+## Quick Reference
+
+| Topic                  | Location                                          |
+|------------------------|---------------------------------------------------|
+| Architecture diagrams  | `.docs/c4/`                                       |
+| Design system          | `DESIGN_SYSTEM_RULES.md`                          |
+| Deprecation tracker    | `DEPRECATION_ANALYSIS.md`                         |
+| Feature examples       | `feature-{example-1}`, `feature-{example-2}`      |
+| Common issues catalog  | `.docs/common-issues/README.md`                   |
+
+### Documentation Pipeline Commands
+
+Three-phase pipeline for feature documentation — from TRD to QA handoff:
+
+| Phase     | Command                                  | When to use    | Inputs                                              |
+|-----------|------------------------------------------|----------------|-----------------------------------------------------|
+| Pre-impl  | `/trd {feature or Confluence URL}`       | Before coding  | PRD + Figma + BE TRD + QA TRD + codebase            |
+| Post-impl | `/feature-report {feature or URL}`       | After coding   | PRD + codebase (reads actual files)                 |
+| QA handoff| `/qa-align {feature or {{JIRA_KEY}}}`    | Before QA      | QA TRD + Compliance Matrix + gap analysis           |
+
+PRD from Confluence is the primary input for `/trd` and `/feature-report`. Jira tickets are optional — used for tracking only, not as requirement source.
+
+**Flags:** `--be-trd` (fetch BE TRD from Confluence), `--qa-trd` (fetch QA TRD from Confluence).
+
+**Output locations:**
+- `/trd` → `.docs/trd/TRD-{Name}.md`
+- `/feature-report` → `.docs/feature-report/{name}/` (README, COMPLIANCE_MATRIX, RESPONSIBILITY_SPLIT, QA_ALIGNMENT, TICKETS)
+- `/qa-align` → `.docs/feature-report/{name}/QA_ALIGNMENT.md` or `.docs/qa-alignment/QA-{Name}.md`
+
+## Build Commands
+
+### Setup
+
+```bash
+# Adjust to your JDK floor (e.g. Gradle 9 + AGP 9 → JDK 21)
+bash scripts/setup-jdk.sh
+```
+
+Replace the credential generation block with your own (e.g. CircleCI/AWS Secrets Manager). The generated files typically include:
+- `credentials.properties` — API URLs and keys
+- `keystore.properties` — signing configuration
+- `version.properties` — version metadata
+- `google-services.json` — Firebase configuration
+
+### Build
+
+```bash
+./gradlew assembleDevelopmentDebug
+./gradlew assembleProductionRelease
+./gradlew build
+./gradlew installDevelopmentDebug
+```
+
+Product flavors (adjust to your project): `development`, `staging`, `production`.
+
+### Testing
+
+```bash
+./gradlew :{module}:testDebugUnitTest
+./gradlew test
+./gradlew :{module}:connectedAndroidTest
+```
+
+## Architecture
+
+| Layer         | Module pattern                  |
+|---------------|---------------------------------|
+| App           | `app`                           |
+| Core          | `core-*`                        |
+| Feature       | `feature-*`                     |
+| Build logic   | `build-logic`                   |
+| Test fixtures | `core-testing`                  |
+
+Adjust the table to match your project's module naming convention.
+
+## Coding Guidelines
+
+1. Define the data model before writing code.
+2. Start with mock data instead of a database.
+3. Create a component library; split code into multiple files.
+4. Centralize state management.
+5. Batch implementation into smaller chunks.
+6. Double-check you're editing the correct files.
+7. Ask follow-up questions if requirements are unclear.
+
+## Commit Rules
+
+- Author: from your local git config (`git config user.name` / `user.email`).
+- No AI/Claude/Anthropic attribution in commit messages.
+- Format: `{type}: {summary} ({{JIRA_KEY}})`
+- Types: `feat` (new feature), `fix` (bug fix), `refactor`, `chore`, `docs`, `test`.
+
+## Documentation Pattern
+
+Plans and acceptance criteria live in `.docs/YYYY/MM/DD/{nn}-{feature}/`:
+- `{feature}-implementation-plan.md`
+- `acceptance-criteria.md` (max 5,000 chars)
+
+Common issues live in `.docs/common-issues/{subject}.md` with subjects:
+- `android` — gradle/SDK/library traps
+- `claude-p-runtime` — `claude -p` invocation gotchas
+- `shell-cron` — bash + cron quirks
+- `tooling` — MCP / Confluence / Jira API gotchas
+
+## Mistake-Learning Pattern
+
+Three commands (`/do-implementation`, `/breakdown-design`, `/plan-first`) instruct Claude to:
+
+1. **Before starting** — read CLAUDE.md Common Issues for known gotchas.
+2. **When a mistake happens** — add it here with what went wrong + how it was fixed.
+
+This creates a feedback loop: each session learns from past sessions and the knowledge persists in the repo.
+
+## Common Issues / Lessons Learned
+
+Per-system detail lives on dedicated docs in `.docs/common-issues/`. This section keeps cross-cutting gotchas that every `claude -p` session must know.
+
+📖 **Full catalog:** `.docs/common-issues/README.md` — subject-grouped index of all entries + Unified Save Protocol for adding new issues.
+
+### Session discipline — 2 gates, every session, no exceptions
+
+1. **Lookup gate · every session's first substantive user message.** Pattern-match the incoming question against the subjects in `.docs/common-issues/README.md`. If it hits a known subject/title, answer from the cataloged pattern first — don't re-discover what's already indexed.
+2. **Save gate · before writing any new learning, and again at session end.** Save in this catalog (CLAUDE.md inline or `.docs/common-issues/` chapter), NOT in local memory. Scan catalog first; if a related subject exists, append a dated sub-note rather than create a sibling.
+
+### Size discipline — every CLAUDE.md edit ends with `wc -c`
+
+After ANY edit to this file, run `wc -c CLAUDE.md`. If > 40000 chars, trim back below 40000 in the same session before stopping.
+
+### `claude -p` invocation gotchas
+
+- **`set -euo pipefail` + bare `claude -p` = infinite loop.** Any non-zero exit kills the script via `set -e` before the retry handler runs. Suffix with `|| IMPL_EXIT=$?`.
+- **`set -u` + undefined variable = silent death.** Typos in variable names kill scripts with no error. Verify variable spelling with `grep -n '<VAR>' script.sh` before relying on it.
+- **`--strict-mcp-config` required on every `claude -p` call when using project-local `.mcp.json`.** Otherwise managed integrations (e.g. Claude Team workspace MCPs) outcompete your local ones.
+
+### Shell + cron
+
+- **Do NOT use `CRON_TZ` in crontab.** Ubuntu ISC cron ignores it for scheduling (only sets `$TZ` inside command). Convert times to system TZ at write-in.
+- **`set -euo pipefail` + Gradle `--continue`** still exits non-zero. Fix root cause (test errors) rather than suppressing with `set +e`.
+- **`grep -c PATTERN file || echo 0` returns `"0\n0"` on empty file.** `grep -c` prints `0` AND exits 1. Fix: `VAR=$(grep -c . "$file" 2>/dev/null) || VAR=0`.
+
+### Confluence API
+
+- **`confluence_update_page` is full-replace.** Always read full page, modify target section only, send complete body back.
+- **Markdown round-trip flattens fenced code blocks.** A ` ```bash ` block becomes `Defaultbash# command…` in ADF and persists on write-back. Use `contentFormat: "adf"` (Mac MCP) or `contentFormat: "storage"` (VPS MCP) for pages with rich content; markdown only for plain prose.
+
+## Recent Updates
+
+(Append one-liner entries here as the project evolves. Drop paragraphs to stay under 40,000 chars.)

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# NOTE: Company-specific leak patterns live in .leak-patterns.local (gitignored),
+# not in this file. Maintainers run scripts/check-leaks.sh locally via a
+# pre-push hook (scripts/install-pre-push-hook.sh). CI here only catches
+# universal token shapes + binary leaks; it does NOT carry any project-
+# specific identifier that would compromise the original maintainer.
+
+jobs:
+  generic-token-scan:
+    name: Generic token leak scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Scan for well-known token formats
+        run: |
+          set -e
+          # Long-enough sequences after well-known prefixes — these are
+          # universal API-token shapes; they reveal nothing about the project.
+          TOKEN_RE='ATATT3xFfGF0[A-Za-z0-9_=-]{20,}|figd_[A-Za-z0-9_-]{20,}|gho_[A-Za-z0-9]{20,}|xox[abp]-[A-Za-z0-9-]{20,}|sk-[A-Za-z0-9]{20,}|AKIA[A-Z0-9]{16}'
+          if grep -rE "$TOKEN_RE" \
+              --exclude-dir=.git --exclude-dir=node_modules \
+              . 2>/dev/null; then
+            echo "::error::Token-shaped string found — rotate the credential and remove from the repo"
+            exit 1
+          fi
+          echo "Token scan: CLEAN"
+
+      - name: Block binary commits under presentation/
+        run: |
+          set -e
+          BINARIES=$(find presentation -type f \( -name '*.pdf' -o -name '*.pptx' -o -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' \) 2>/dev/null)
+          if [ -n "$BINARIES" ]; then
+            echo "::error::Forbidden binary in presentation/ — only sanitised HTML and speaker notes may ship:"
+            echo "$BINARIES"
+            exit 1
+          fi
+          echo "Binary scan: CLEAN"
+
+  shellcheck:
+    name: Shell lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          # Exclusions:
+          # SC1091 sourced file not followed; SC2155 declare/assign style;
+          # SC2294 eval with array (intentional in do_or_say helper);
+          # SC2015 A && B || C != if-then-else (intentional in setup-mcp.sh).
+          shellcheck --severity=warning -e SC1091,SC2155,SC2294,SC2015 \
+            install.sh setup-mcp.sh doctor.sh sync-from-source.sh \
+            scripts/check-leaks.sh scripts/install-pre-push-hook.sh
+
+  bats:
+    name: Installer smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bats
+        run: |
+          sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Run tests
+        run: bats tests/
