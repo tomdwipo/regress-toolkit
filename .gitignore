@@ -27,6 +27,11 @@ tests/.tmp/
 .env.local
 secrets/
 
+# CLI debug artefacts — firebase CLI writes signed-in user email here
+firebase-debug.log
+firebase-debug.*.log
+*-debug.log
+
 # Local-only leak/sanitiser config — keeps company-specific patterns out of
 # the public repo. Maintainers copy *.example to the real name and fill in.
 .leak-patterns.local
