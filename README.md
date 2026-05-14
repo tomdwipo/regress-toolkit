@@ -186,6 +186,7 @@ Installed automatically with `--mobile` or `--all` profile. Each skill has a `re
 |-------------------------------------|-------------------------------------------------------------|
 | [`PRESENTATION.md`](PRESENTATION.md)| Marp-flavoured slide deck (renderable to PDF/HTML)          |
 | [`presentation/`](presentation/)    | Full 25-min seminar deck — HTML + speaker notes (Bahasa/English) |
+| [`docs/c4/`](docs/c4/)              | C4 architecture model (ASCII) — context → container → component → code |
 | [`docs/REGRESS-WORKFLOW.md`](docs/REGRESS-WORKFLOW.md) | What the regress flow is and why it exists |
 | [`docs/HOW-TO-USE.md`](docs/HOW-TO-USE.md)            | Per-command walkthroughs                  |
 | [`docs/CLAUDE-MD-GUIDE.md`](docs/CLAUDE-MD-GUIDE.md)  | Anatomy of a good CLAUDE.md               |
@@ -216,6 +217,7 @@ regress-toolkit/
 ├── templates/       (CLAUDE.md.template, CLAUDE.md.example, .mcp.json, settings.local.json)
 ├── mcp/             (5 .md — per-server install notes)
 ├── docs/            (4 .md — workflow, how-to, CLAUDE.md guide, troubleshooting)
+│   └── c4/          (C4 architecture model — ASCII, 4 levels + nav)
 ├── presentation/    (HTML seminar deck + speaker notes)
 └── tests/           (bats install smoke test)
 ```
